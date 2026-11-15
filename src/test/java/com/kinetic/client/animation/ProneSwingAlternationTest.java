@@ -6,6 +6,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -55,9 +56,14 @@ class ProneSwingAlternationTest {
                     new File(MODELS, model + "/animations/main.animation.json").toPath(),
                     StandardCharsets.UTF_8)).getAsJsonObject().getAsJsonObject("animations");
             for (String name : new String[]{"prone:swing", "prone:swing:alt"}) {
-                var bones = root.getAsJsonObject(name).getAsJsonObject("bones");
+                var animation = root.getAsJsonObject(name);
+                var bones = animation.getAsJsonObject("bones");
+                assertEquals(0.62, animation.get("animation_length").getAsDouble(), 1e-6,
+                        model + "/" + name + ": current authored swing duration is 0.62s");
                 assertTrue(bones.has("RightArm"), model + "/" + name + ": 缺 RightArm");
                 assertTrue(bones.has("RightForeArm"), model + "/" + name + ": 缺 RightForeArm");
+                assertEquals(13, bones.getAsJsonObject("RightArm").getAsJsonObject("rotation").size(),
+                        model + "/" + name + ": expected 13 authored swing keys");
                 assertTrue(bones.has("MAllBody"), model + "/" + name + ": 缺 MAllBody 侧滚");
             }
         }

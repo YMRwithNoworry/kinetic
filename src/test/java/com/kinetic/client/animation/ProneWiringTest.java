@@ -46,11 +46,14 @@ class ProneWiringTest {
     void predicateConsultsTheStateMachineAndFollowsOtherChannels() throws Exception {
         String pool = constantPool("com/kinetic/client/animation/predicate/PronePredicate");
         assertTrue(pool.contains(PRONE_ACTION), "PronePredicate 必须读取 ProneAction 状态");
-        for (String controller : new String[]{"player.use", "player.fire", "player.hold_mainhand"}) {
+        for (String controller : new String[]{"player.use", "player.fire", "player.hold_mainhand", "player.swing"}) {
             assertTrue(pool.contains(controller),
                     "PronePredicate 必须按 " + controller + " 当前在播的动画判断动作种类");
         }
         assertTrue(pool.contains("prone:action:idle"), "必须存在通用回退动画名");
+        assertTrue(pool.contains("prone:swing"), "必须识别侧躺主挥砍来驱动 roll");
+        assertTrue(pool.contains("prone:swing:alt"), "必须识别侧躺反手挥砍来驱动 roll");
+        assertTrue(pool.contains("prone:throw"), "必须识别侧躺投掷来驱动 roll");
     }
 
     @Test

@@ -32,6 +32,7 @@ import static com.kinetic.client.animation.predicate.IAnimationPredicate.playAni
  *   <li>{@code player.hold_mainhand} 在播 {@code tac:mainhand:grenade} → 手雷蓄力；</li>
  *   <li>{@code player.use} 在播 {@code *:medical} → 打药；</li>
  *   <li>{@code player.fire} 在播 {@code tac:reload:*} → 换弹；</li>
+ *   <li>{@code player.swing} 在播 {@code prone:swing} / {@code prone:swing:alt} 或 {@code prone:throw} → 挥砍 / 投掷；</li>
  *   <li>{@code player.use} 在播 {@code *:eat} / {@code *:drink} → 吃喝（只需要把头腿摆正）。</li>
  * </ul>
  * 换弹动画是一次性的，播完就离开 RUNNING；TaCZ 的重载计数还在时用它兜底。
@@ -43,6 +44,9 @@ public class PronePredicate implements IAnimationPredicate<CustomHumanoidEntity<
     static final String CONTROLLER_HOLD = "player.hold_mainhand";
 
     static final String IDLE_ANIMATION = "prone:action:idle";
+    /** 匍匐侧躺挥砍动画名；本频道不重复写 swing 频道的手臂弧线。 */
+    static final String PRONE_SWING = "prone:swing";
+    static final String PRONE_SWING_ALT = "prone:swing:alt";
     /** 由 swing 频道播放的匍匐投掷动画；本频道不重复写它。 */
     static final String THROW_ANIMATION = "prone:throw";
 
@@ -82,10 +86,9 @@ public class PronePredicate implements IAnimationPredicate<CustomHumanoidEntity<
 
     /** 本帧的动作种类；{@code NONE} 表示没有正在进行的动作。 */
     static ProneAction.Kind detect(AnimationEvent<? extends CustomHumanoidEntity<?>> event, Player player) {
-        // 投掷：swing 频道正在播匍匐投掷动画。它自己会写侧躺姿势，这里只要把 roll 推上去。
-        String swing = currentAnimation(event, CONTROLLER_SWING);
-        if (swing != null && swing.equals(THROW_ANIMATION)) {
-            return ProneAction.Kind.THROW;
+        ProneAction.Kind swingKind = kindForSwingAnimation(currentAnimation(event, CONTROLLER_SWING));
+        if (swingKind != ProneAction.Kind.NONE) {
+            return swingKind;
         }
         // 正在使用物品：优先读玩家自己的状态，而不是某个频道"恰好"把动画名选成我们认识的样子。
         // 只看动画名会漏掉一大类情况：趴下按右键掐雷时 hold 频道播的是 tac:hold:grenade（瞄准/持握），
@@ -138,6 +141,17 @@ public class PronePredicate implements IAnimationPredicate<CustomHumanoidEntity<
         return TACZCompat.isGrenade(stack) || SWarfareCompat.isGrenade(stack);
     }
 
+    /** 将 swing 频道的侧躺动画映射为需要侧滚的动作种类。 */
+    public static ProneAction.Kind kindForSwingAnimation(@Nullable String animation) {
+        if (THROW_ANIMATION.equals(animation)) {
+            return ProneAction.Kind.THROW;
+        }
+        if (PRONE_SWING.equals(animation) || PRONE_SWING_ALT.equals(animation)) {
+            return ProneAction.Kind.SWING;
+        }
+        return ProneAction.Kind.NONE;
+    }
+
     /** 物品注册名里是否含有关键词（不依赖任何联动模组）。 */
     static boolean idLooksLike(ItemStack stack, String[] hints) {
         if (stack == null || stack.isEmpty()) {
@@ -178,16 +192,17 @@ public class PronePredicate implements IAnimationPredicate<CustomHumanoidEntity<
      */
     @Nullable
     public static String animationNameFor(ProneAction.Kind kind, java.util.function.Predicate<String> available) {
-        if (kind == ProneAction.Kind.THROW) {
-            // 投掷姿势完全由 swing 频道的 prone:throw 负责，本频道只管把 roll 推上去。
-            return null;
-        }
         String name = switch (kind) {
             case MEDICAL -> "prone:action:medical";
             case RELOAD -> "prone:action:reload";
             case GRENADE -> "prone:action:grenade";
-            case OTHER, NONE, THROW -> IDLE_ANIMATION;
+            case OTHER, NONE -> IDLE_ANIMATION;
+            case SWING, THROW -> null;
         };
+        if (name == null) {
+            // 投掷与挥砍姿势完全由 swing 频道负责，本频道只管把 roll 推上去。
+            return null;
+        }
         if (available.test(name)) {
             return name;
         }

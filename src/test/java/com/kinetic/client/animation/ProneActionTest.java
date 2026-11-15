@@ -3,6 +3,7 @@ package com.kinetic.client.animation;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -14,6 +15,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ProneActionTest {
     private static ProneAction.State state() {
         return new ProneAction.State();
+    }
+
+    @Test
+    void swingSequenceStartsOnPrimaryAndAdvancesOnlyInsideTheChainWindow() {
+        ProneAction.State s = state();
+        assertFalse(ProneAction.beginSwing(s, false), "新序列必须从主段开始");
+        assertFalse(ProneAction.beginSwing(s, false), "连招窗口外重复挥砍应留在当前段");
+        assertTrue(ProneAction.beginSwing(s, true), "窗口内下一段应切到反手段");
+        assertFalse(ProneAction.beginSwing(s, true), "再推进一段应回到主段");
+    }
+
+    @Test
+    void meleeSwingKindDrivesTheProneRoll() {
+        ProneAction.State s = state();
+        float roll = ProneAction.advance(s, 1.0f / 3.0f, true, true, ProneAction.Kind.SWING);
+        assertTrue(roll > 0.0f, "挥砍动作必须启动侧躺 roll");
+        assertEquals(ProneAction.Kind.SWING, s.kind);
     }
 
     @Test

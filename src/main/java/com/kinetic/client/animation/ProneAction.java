@@ -32,7 +32,9 @@ public final class ProneAction {
         MEDICAL,
         RELOAD,
         GRENADE,
-        /** 趴下挥动（投掷）：动画由 swing 频道播 {@code prone:throw}，本频道只负责把它滚进侧躺。 */
+        /** 匍匐挥砍；动画由 swing 频道播 prone:swing 或 prone:swing:alt。 */
+        SWING,
+        /** 匍匐投掷：动画由 swing 频道播 {@code prone:throw}，本频道只负责把它滚进侧躺。 */
         THROW,
         OTHER
     }
@@ -267,10 +269,20 @@ public final class ProneAction {
             return false;
         }
         State state = STATES.computeIfAbsent(player, p -> new State());
-        if (advance) {
-            state.swingIndex = state.swingIndex + 1;
+        return beginSwing(state, advance);
+    }
+
+    static boolean beginSwing(State state, boolean advance) {
+        if (state.swingIndex == 0) {
+            state.swingIndex = 1;
+        } else if (advance) {
+            state.swingIndex++;
         }
-        return ((state.swingIndex - 1) & 1) == 1;
+        return isAlternateSwing(state);
+    }
+
+    private static boolean isAlternateSwing(State state) {
+        return state.swingIndex > 0 && (state.swingIndex & 1) == 0;
     }
 
     /** 当前这一段是否反手（由 {@link #beginSwing} 推进）。 */
@@ -279,7 +291,7 @@ public final class ProneAction {
             return false;
         }
         State state = STATES.get(player);
-        return state != null && ((state.swingIndex - 1) & 1) == 1;
+        return state != null && isAlternateSwing(state);
     }
 
     public static boolean isActive(@Nullable Player player) {

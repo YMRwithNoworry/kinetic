@@ -63,7 +63,7 @@ public class SwingPredicate implements IAnimationPredicate<CustomHumanoidEntity<
 
         if (entity.swinging && !entity.isSleeping()) {
             if (entity.swingTime == 0 && event.getAnimatableEntity().getStateTracker().setEntityTickState(EntityTickStates.SWING)) {
-                // 连招窗口：上一段已经挥出、还没收完（>55%）时再触发才接下一段；
+                // 连招窗口：上一段已经挥出、还没收完（进度至少 70%）时再触发才接下一段；
                 // 太早的连点不推进段数，而是把当前这一段重放一遍——否则会从半空里硬切到
                 // 另一段的起手姿势。
                 float progress = swingProgress(event);
@@ -122,8 +122,8 @@ public class SwingPredicate implements IAnimationPredicate<CustomHumanoidEntity<
     /**
      * 当前挥动动画播到哪了（0~1）。
      *
-     * <p>用来在"趴下 ↔ 站立"切换时把进度传给另一段弧线：两段长度不同（站姿 0.375s、
-     * 趴下 0.45s），按比例映射后接着播。拿不到长度就返回 0——那等于从头开始，与改动前一致。
+     * <p>用来在"趴下 ↔ 站立"切换时把进度传给另一段弧线：站姿挥动长 0.375s、侧躺挥砍长 0.62s，
+     * 投掷时则使用资源自身的长度；按比例映射后接着播。拿不到长度就返回 0——那等于从头开始，与改动前一致。
      */
     static float swingProgress(AnimationEvent<CustomHumanoidEntity<?>> event) {
         var controller = event.getCodedController();
@@ -148,7 +148,9 @@ public class SwingPredicate implements IAnimationPredicate<CustomHumanoidEntity<
         if (prone || currentAnimation == null) {
             return false;
         }
-        return PRONE_SWING.equals(currentAnimation) || PRONE_THROW.equals(currentAnimation);
+        return PRONE_SWING.equals(currentAnimation)
+                || PRONE_SWING_ALT.equals(currentAnimation)
+                || PRONE_THROW.equals(currentAnimation);
     }
 
     /**

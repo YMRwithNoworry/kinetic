@@ -20,6 +20,16 @@ class PronePredicateMappingTest {
             "prone:action:idle", "prone:action:medical", "prone:action:reload", "prone:action:grenade");
 
     @Test
+    void swingAnimationsMapToTheActionThatOwnsTheirRoll() {
+        assertEquals(ProneAction.Kind.SWING, PronePredicate.kindForSwingAnimation("prone:swing"));
+        assertEquals(ProneAction.Kind.SWING, PronePredicate.kindForSwingAnimation("prone:swing:alt"));
+        assertEquals(ProneAction.Kind.THROW, PronePredicate.kindForSwingAnimation("prone:throw"));
+        assertEquals(ProneAction.Kind.NONE, PronePredicate.kindForSwingAnimation("swing_hand"));
+        assertNull(PronePredicate.animationNameFor(ProneAction.Kind.SWING, FULL::contains));
+        assertNull(PronePredicate.animationNameFor(ProneAction.Kind.THROW, FULL::contains));
+    }
+
+    @Test
     void eachKindUsesItsOwnAnimationWhenPresent() {
         assertEquals("prone:action:medical", PronePredicate.animationNameFor(ProneAction.Kind.MEDICAL, FULL::contains));
         assertEquals("prone:action:reload", PronePredicate.animationNameFor(ProneAction.Kind.RELOAD, FULL::contains));

@@ -250,7 +250,7 @@ class PronePoseDataTest {
     @Test
     void proneMeleeAndThrowRollTheBody() throws Exception {
         for (String model : MODELS) {
-          for (String name : List.of("prone:swing", "prone:throw")) {
+          for (String name : List.of("prone:swing", "prone:swing:alt", "prone:throw")) {
             JsonObject anim = animations(model, "main.animation.json").getAsJsonObject(name);
             assertNotNull(anim, model + ": 缺少 " + name);
             JsonObject bones = anim.getAsJsonObject("bones");
@@ -271,7 +271,7 @@ class PronePoseDataTest {
     @Test
     void proneMeleeAndThrowKeepTheLegsFree() throws Exception {
         for (String model : MODELS) {
-            for (String name : List.of("prone:swing", "prone:throw")) {
+            for (String name : List.of("prone:swing", "prone:swing:alt", "prone:throw")) {
                 JsonObject anim = animations(model, "main.animation.json").getAsJsonObject(name);
                 assertNotNull(anim, model + ": 缺少 " + name);
                 JsonObject bones = anim.getAsJsonObject("bones");
