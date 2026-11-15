@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -66,13 +67,30 @@ class NativeModelStateIntegrationTest {
                     2, 2, 29, false);
             try (var bakedData = baked.bakedData()) {
                 var read = NativeBakedModel.read(bakedData, 1);
-                try (var bakedModel = read.bakedModel()) {
+                try (var bakedModel = read.bakedModel();
+                     var state = NativeModelState.create()) {
+                    var attributes = new float[AnimatedGeoModel.BONE_ATTRIBUTE_COUNT];
+                    attributes[6] = 1;
+                    attributes[7] = 1;
+                    attributes[8] = 1;
+                    attributes[13] = 0xFFFF;
+                    assertTrue(state.extract(bakedModel, attributes));
+                    var firstPoseView = state.getBonePoses();
+                    var firstRenderBoneView = state.getRenderBoneIndices();
+                    assertEquals(1, firstRenderBoneView.capacity());
+                    firstRenderBoneView.position(1);
+
                     var uv = bakedModel.getCubeData(0, 1, 0, 1)[0]
                             .quads()[0].uv();
                     assertArrayEquals(new Vector2f[]{
                             new Vector2f(0, 0), new Vector2f(0.5f, 0),
                             new Vector2f(0.5f, 0.5f), new Vector2f(0, 0.5f)
                     }, uv);
+
+                    assertTrue(state.extract(bakedModel, attributes));
+                    assertSame(firstPoseView, state.getBonePoses());
+                    assertSame(firstRenderBoneView, state.getRenderBoneIndices());
+                    assertEquals(0, state.getRenderBoneIndices().position());
                 }
             }
         }
@@ -105,11 +123,19 @@ class NativeModelStateIntegrationTest {
                     attributes[13] = 0xFFFF;
 
                     assertTrue(state.extract(bakedModel, attributes));
-                    assertEquals(1, state.getBonePoses().getBoneCount());
+                    var originalBonePoseView = state.getBonePoses();
+                    assertEquals(1, originalBonePoseView.getBoneCount());
                     assertEquals(0, state.getRenderBoneIndices().capacity());
                     assertTrue(state.getLocatorBoneIndices().isEmpty());
                     assertEquals(0, state.getTotalVertexCount());
                     assertEquals(0, state.getTranslucentVertexCount());
+
+                    assertFalse(state.extract(bakedModel, new float[0]));
+                    assertFalse(state.isValid());
+                    assertNull(state.getBonePoses());
+
+                    assertTrue(state.extract(bakedModel, attributes));
+                    assertSame(originalBonePoseView, state.getBonePoses());
 
                     state.close();
                     assertFalse(state.isValid());

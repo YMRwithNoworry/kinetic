@@ -33,14 +33,14 @@
 
 ## Molang 与同步
 
-- 模型内 Molang 已回到本地解释器直接执行 source：加载与绑定会解析 execution-bearing 字段，求值在渲染路径上逐次进行。求值路径没有专门的单元测试，热路径的解析/求值成本、allocation、表达式复杂度上限与 tick/render 影响都尚未测量，不能声明主循环成本可接受；expression runtime 在 Minecraft/Forge world 层也没有端到端验证。
+- 模型内 Molang 已回到本地解释器直接执行 source：加载与绑定会解析 execution-bearing 字段，求值在渲染路径上逐次进行。现在有一个动态 `query.life_time` binding 的解析/求值语义测试及 opt-in 微基准；本机合成样例约 24 ns / 32 B 每次 evaluate、2.3 μs / 1.1 KB 每次 parse。它不代表真实模型函数、完整 `MolangContext` 或 controller 总成本；表达式复杂度上限、生产热路径分布与 tick/render 影响仍未测量，Minecraft/Forge world 层也没有端到端验证。
 - Roaming 的 full 与 delta 已由玩家状态报告路径携带并在消费端按协议验证，但网络 inactive storage 仍按模型派生的 32-bit 短键分组，短键碰撞和协议无变量删除语义仍未解决。
 - `kinetic.sync` 只携带有限 F32 参数并把参数个数限制为 16，没有目标 identity、独立频率限制，按设计也没有 sequence、ACK、重放或持久化。实体缺失、generation/model 不一致或会话变化时事件会丢失，真实双端 relay/disconnect 路径尚未验证。
 
 ## 联动与验证
 
 - 主线仍直接接线部分战斗、移动、载具和装备 adapter，大量目标未迁入；既有接线也未按统一输入边界完成线程审计与实机验收，不能视为正式支持。
-- Java/corpus 测试已覆盖 animation/controller 的 Proto 映射与字段顺序、`Program` envelope 的 oneof tag 与 source 往返、ModelData 的双 Proto codec 互操作、内置目录索引、模型导入与 raw parse、Roaming 变量存储，以及模型声音 retention/playback/handoff 的局部边界；`test` task 最近执行 713 项，0 failure、0 error、10 skipped。它仍缺少 coded / Bedrock / hybrid controller 在真实 entity 上运行、controller config、`kinetic.sync`、多人远端 `Entity`、模型热切换、同帧多 `RenderContext`、声音 once-only/音量/host adoption、第一人称共享和长期 reference convergence 的 Minecraft 端到端测试。表达式解释器的解析与求值本身没有直接测试。
+- Java/corpus 测试已覆盖 animation/controller 的 Proto 映射与字段顺序、`Program` envelope 的 oneof tag 与 source 往返、ModelData 的双 Proto codec 互操作、内置目录索引、模型导入与 raw parse、Roaming 变量存储，以及模型声音 retention/playback/handoff 的局部边界。`MolangEvaluationBenchmarkTest` 现在覆盖一个动态 query binding，并提供 opt-in 的固定表达式 parse/evaluate 微基准；仍缺少 coded / Bedrock / hybrid controller 在真实 entity 上运行、controller config、`kinetic.sync`、多人远端 `Entity`、模型热切换、同帧多 `RenderContext`、声音 once-only/音量/host adoption、第一人称共享和长期 reference convergence 的 Minecraft 端到端测试。完整测试计数见[当前支持状态](../support-and-verification.md)。表达式解释器的广泛语义仍未覆盖。
 - `BoneAttribute` 与 `BakedModel` preorder、可见性、locator 的跨语言契约缺少独立 golden 验证；布局重复定义仍有漂移风险。
 
 模组恢复边界见[模组动画联动](../../future/mod-animation-integration.md)，渲染侧的 extract、locator 与重入缺口见[渲染已知问题](rendering.md)。

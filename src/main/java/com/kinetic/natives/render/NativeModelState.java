@@ -31,7 +31,13 @@ public final class NativeModelState extends NativeObject {
     private final long[] extractOutput = new long[4];
 
     private BonePoseView bonePoses;
+    private BonePoseView cachedBonePoses;
+    private long cachedBonePoseAddress;
+    private int cachedBonePoseCount = -1;
     private ShortBuffer renderBoneIndices;
+    private ShortBuffer cachedRenderBoneIndices;
+    private long cachedRenderBoneAddress;
+    private int cachedRenderBoneCount = -1;
     private int locatorCount;
     private int totalVertexCount;
     private int translucentVertexCount;
@@ -73,9 +79,16 @@ public final class NativeModelState extends NativeObject {
             return false;
         }
 
-        bonePoses = new BonePoseView(extractOutput[0], expectedBoneCount);
+        var poseAddress = extractOutput[0];
+        if (cachedBonePoses == null || cachedBonePoseAddress != poseAddress
+                || cachedBonePoseCount != expectedBoneCount) {
+            cachedBonePoses = new BonePoseView(poseAddress, expectedBoneCount);
+            cachedBonePoseAddress = poseAddress;
+            cachedBonePoseCount = expectedBoneCount;
+        }
+        bonePoses = cachedBonePoses;
         var renderBoneCount = Math.toIntExact(extractOutput[2] & 0xFFFFFFFFL);
-        renderBoneIndices = borrowShortBuffer(extractOutput[1], renderBoneCount);
+        renderBoneIndices = borrowRenderBoneIndices(extractOutput[1], renderBoneCount);
         locatorCount = Math.toIntExact(extractOutput[2] >>> 32);
         totalVertexCount = Math.toIntExact(extractOutput[3] & 0xFFFFFFFFL);
         translucentVertexCount = Math.toIntExact(extractOutput[3] >>> 32);
@@ -193,19 +206,33 @@ public final class NativeModelState extends NativeObject {
         return NativeBuffer.borrow(MemoryUtil.memByteBuffer(ptr, size));
     }
 
-    private static ShortBuffer borrowShortBuffer(long ptr, int size) {
+    private ShortBuffer borrowRenderBoneIndices(long ptr, int size) {
         if (size == 0) {
             return EMPTY_SHORT_BUFFER;
         }
         if (ptr == 0) {
-            throw new IllegalStateException("Native short buffer pointer is null");
+            throw new IllegalStateException("Native render bone index pointer is null");
         }
-        return MemoryUtil.memShortBuffer(ptr, size);
+        if (cachedRenderBoneIndices == null || cachedRenderBoneAddress != ptr
+                || cachedRenderBoneCount != size) {
+            cachedRenderBoneIndices = MemoryUtil.memShortBuffer(ptr, size);
+            cachedRenderBoneAddress = ptr;
+            cachedRenderBoneCount = size;
+        } else {
+            cachedRenderBoneIndices.clear();
+        }
+        return cachedRenderBoneIndices;
     }
 
     @Override
     public void close() {
         invalidate();
+        cachedBonePoses = null;
+        cachedBonePoseAddress = 0;
+        cachedBonePoseCount = -1;
+        cachedRenderBoneIndices = null;
+        cachedRenderBoneAddress = 0;
+        cachedRenderBoneCount = -1;
         super.close();
     }
 

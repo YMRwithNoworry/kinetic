@@ -108,7 +108,7 @@ public class NativeRenderer {
                 (argb & 0xFF000000);
     }
 
-    private static native boolean nRender(Object vertexBuffer, int vertexBufferFlag, long matPtr, long modelStatePtr,
+    static native boolean nRender(Object vertexBuffer, int vertexBufferFlag, long matPtr, long modelStatePtr,
                                           long lightAndOverlay, int color, long flags, long irisEntityId);
 
     private static final class MatBufferHolder {

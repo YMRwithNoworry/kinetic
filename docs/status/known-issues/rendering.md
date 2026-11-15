@@ -18,6 +18,7 @@
 ## 并发与性能
 
 - `ParallelExecutor`、translucent scratch、`VertexConsumer` fallback 与 `NativeRenderer` 的共享 matrix scratch 都不可重入，多个 `renderer::Render` 必须全局串行。`ModelState` 原地复用自身 pose 与索引存储，Java view 只在该状态的有效期内可读，因此同一输出槽的 Extract、Render、换模与释放必须串行。
+- 当前 opt-in CPU 微基准只覆盖合成 opaque 模型的 Extract 和 direct JNI fallback 顶点输出；不包含 Java `VertexConsumer` 提交、Minecraft/Iris pass、GPU draw、真实多实体调度或透明/PBR 场景，不能作为端到端性能或视觉支持证据，详见[验证台账](../verification-ledger.md)。
 - 调度按不可拆分 `CubeGroup` 数而非实际 quad、PBR 或剔除成本分配任务，复杂模型可能出现 worker 尾部不均衡。
 - 剔除分区按最大可见容量预留，并以零值填充未使用槽位，这是固定 offset 的当前代价。
 

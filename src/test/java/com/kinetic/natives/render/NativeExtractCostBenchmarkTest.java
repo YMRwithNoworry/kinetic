@@ -11,6 +11,7 @@ import com.kinetic.proto.mixel.asset.model.data.GeoProperties;
 import com.kinetic.testutil.NativeLibraryExtension;
 import com.kinetic.util.ProtoUtil;
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,17 +37,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Run it with:
  *
  * <pre>
- * source /home/admin/NS/gradle-env.sh &amp;&amp; cd /home/admin/NS/kinetic &amp;&amp;
- *   KINETIC_BENCH_EXTRACT=1 ./gradlew test --offline --tests '*NativeExtractCostBenchmarkTest*'
+ * KINETIC_BENCH_EXTRACT=1 KINETIC_BENCH_DIAGNOSTIC=1 KINETIC_BENCH_RENDER=1
+ * ./gradlew test --offline --tests '*NativeExtractCostBenchmarkTest*'
  * </pre>
+ *
+ * <p>Set {@code KINETIC_BENCH_RENDER=1} to include direct JNI fallback-output timing.
  */
 @EnabledIfEnvironmentVariable(named = "KINETIC_NATIVE_PATH", matches = ".+")
 @ExtendWith(NativeLibraryExtension.class)
 class NativeExtractCostBenchmarkTest {
     private static final String BENCHMARK_ENV = "KINETIC_BENCH_EXTRACT";
     private static final String DIAGNOSTIC_ENV = "KINETIC_BENCH_DIAGNOSTIC";
+    private static final String RENDER_ENV = "KINETIC_BENCH_RENDER";
     private static final int WARMUP_ITERATIONS = 5_000;
     private static final int MEASURE_ITERATIONS = 200_000;
+    private static final int RENDER_WARMUP_ITERATIONS = 500;
+    private static final int RENDER_ITERATIONS_PER_BATCH = 2_000;
+    private static final int RENDER_BATCHES = 5;
+    private static final int OUTPUT_INTS_PER_VERTEX = 8;
     private static final int GETTER_ITERATIONS = 20_000_000;
     private static final int TEXTURE_SIZE = 64;
     private static final int ORIGIN_VERSION = 29;
@@ -61,6 +69,9 @@ class NativeExtractCostBenchmarkTest {
 
         System.out.println("=== KINETIC native extract cost benchmark ===");
         System.out.println("cpu             = " + cpuModel());
+        System.out.println("java            = " + System.getProperty("java.version"));
+        System.out.println("os              = " + System.getProperty("os.name") + " "
+                + System.getProperty("os.version") + " / " + System.getProperty("os.arch"));
         System.out.println("warmup          = " + WARMUP_ITERATIONS + " iterations");
         System.out.println("measure         = " + MEASURE_ITERATIONS + " iterations");
         System.out.println("attribute count = " + AnimatedGeoModel.BONE_ATTRIBUTE_COUNT
@@ -114,12 +125,14 @@ class NativeExtractCostBenchmarkTest {
                         state.extract(bakedModel, attributes);
                     }
 
+                    var allocatedBefore = currentThreadAllocatedBytes();
                     var start = System.nanoTime();
                     var success = true;
                     for (var i = 0; i < MEASURE_ITERATIONS; i++) {
                         success &= state.extract(bakedModel, attributes);
                     }
                     var elapsed = System.nanoTime() - start;
+                    var allocatedAfter = currentThreadAllocatedBytes();
 
                     assertTrue(success, spec.name() + ": extract failed during measurement");
                     assertEquals(spec.expectedRenderBoneCount(), renderBoneIndices.capacity(),
@@ -129,19 +142,74 @@ class NativeExtractCostBenchmarkTest {
                     System.out.printf(
                             "%-26s bones=%2d cubes=%2d fullVerts=%4d schedVerts=%4d "
                                     + "renderBones=%2d | total=%9.3f ms | %9.1f ns/extract "
-                                    + "| %11.0f extracts/s | %6.1f ns/bone%n",
+                                    + "| %11.0f extracts/s | %6.1f ns/bone | %6.1f B/extract%n",
                             spec.name(), spec.boneCount(), spec.cubeCount(),
                             spec.fullVertexCount(), totalVertexCount,
                             renderBoneIndices.capacity(), elapsed / 1_000_000.0,
                             nanosPerExtract, 1_000_000_000.0 / nanosPerExtract,
-                            nanosPerExtract / spec.boneCount());
+                            nanosPerExtract / spec.boneCount(),
+                            bytesPerOperation(allocatedBefore, allocatedAfter, MEASURE_ITERATIONS));
                     if (isDiagnostic()) {
                         System.out.println("  baked partitions: " + describeBaked(bakedModel));
                         System.out.println("  batch spread:     " + batchSpread(state, bakedModel,
                                 attributes));
                     }
+                    if ("1".equals(System.getenv(RENDER_ENV))) {
+                        measureNativeRender(spec.name(), state, totalVertexCount);
+                    }
                 }
             }
+        }
+    }
+
+    private static void measureNativeRender(String name, NativeModelState state,
+                                            int vertexCount) {
+        var output = new int[Math.multiplyExact(vertexCount, OUTPUT_INTS_PER_VERTEX)];
+        try (var matrices = NativeBuffer.allocate(256, 64)) {
+            MemoryUtil.memSet(matrices.ptr(), 0, matrices.size());
+            for (var matrix = 0; matrix < 4; matrix++) {
+                var base = matrices.ptr() + matrix * 64L;
+                for (var diagonal = 0; diagonal < 4; diagonal++) {
+                    MemoryUtil.memPutFloat(base + diagonal * 20L, 1.0f);
+                }
+            }
+
+            var success = true;
+            for (var i = 0; i < RENDER_WARMUP_ITERATIONS; i++) {
+                success &= NativeRenderer.nRender(output, 0, matrices.ptr(), state.get(),
+                        0L, -1, 0L, 0L);
+            }
+
+            var allocatedBefore = currentThreadAllocatedBytes();
+            var batches = new double[RENDER_BATCHES];
+            for (var batch = 0; batch < RENDER_BATCHES; batch++) {
+                var start = System.nanoTime();
+                for (var i = 0; i < RENDER_ITERATIONS_PER_BATCH; i++) {
+                    success &= NativeRenderer.nRender(output, 0, matrices.ptr(), state.get(),
+                            0L, -1, 0L, 0L);
+                }
+                batches[batch] = (double) (System.nanoTime() - start)
+                        / RENDER_ITERATIONS_PER_BATCH;
+            }
+            var allocatedAfter = currentThreadAllocatedBytes();
+            assertTrue(success, name + ": native render failed during measurement");
+
+            var sorted = batches.clone();
+            Arrays.sort(sorted);
+            var batchValues = new StringBuilder();
+            var average = 0.0;
+            for (var value : batches) {
+                average += value / batches.length;
+                batchValues.append(batchValues.isEmpty() ? "" : ", ")
+                        .append(String.format("%.1f", value));
+            }
+            System.out.printf("  native render   = %-26s verts=%4d | %8.1f ns/draw"
+                            + " | %6.2f ns/vertex | batch min/median/max %.1f/%.1f/%.1f"
+                            + " ns | %6.1f B/draw | batches [%s]%n",
+                    name, vertexCount, average, average / vertexCount,
+                    sorted[0], sorted[sorted.length / 2], sorted[sorted.length - 1],
+                    bytesPerOperation(allocatedBefore, allocatedAfter,
+                            (long) RENDER_BATCHES * RENDER_ITERATIONS_PER_BATCH), batchValues);
         }
     }
 
@@ -183,6 +251,28 @@ class NativeExtractCostBenchmarkTest {
                             (double) elapsed / GETTER_ITERATIONS, sink);
                 }
             }
+        }
+    }
+
+    private static double bytesPerOperation(long before, long after, long operations) {
+        return before < 0 || after < before
+                ? Double.NaN
+                : (double) (after - before) / operations;
+    }
+
+    private static long currentThreadAllocatedBytes() {
+        var bean = ManagementFactory.getThreadMXBean();
+        if (!(bean instanceof com.sun.management.ThreadMXBean allocationBean)
+                || !allocationBean.isThreadAllocatedMemorySupported()) {
+            return -1;
+        }
+        try {
+            if (!allocationBean.isThreadAllocatedMemoryEnabled()) {
+                allocationBean.setThreadAllocatedMemoryEnabled(true);
+            }
+            return allocationBean.getThreadAllocatedBytes(Thread.currentThread().getId());
+        } catch (SecurityException | UnsupportedOperationException ignored) {
+            return -1;
         }
     }
 
@@ -244,6 +334,10 @@ class NativeExtractCostBenchmarkTest {
     }
 
     private static String cpuModel() {
+        var processorIdentifier = System.getenv("PROCESSOR_IDENTIFIER");
+        if (processorIdentifier != null && !processorIdentifier.isBlank()) {
+            return processorIdentifier;
+        }
         try {
             for (var line : Files.readAllLines(Path.of("/proc/cpuinfo"))) {
                 if (line.startsWith("model name")) {

@@ -8,18 +8,20 @@
 | 项 | 值 |
 | --- | --- |
 | jar | `kinetic-3.0-dev-forge+mc1.20.1.jar` |
-| 字节数 | 17,720,417 |
-| sha256 | `1ee576f080c9dd92c987a37973f1782a40c4219dbc9804e39cd253aede5a5e14` |
-| 测试 | 783 tests / 0 failures / 10 skipped |
-| 文档自检 | `python3 docs/tools/check_docs.py` → `OK: documentation tree is self-contained` |
+| 字节数 | 17,727,701 |
+| sha256 | `ccceb1f62fe59c01b61dccfd88214e20c1ffa42372443eaf102a79d39e11cd98` |
+| 测试 | 上次全量（本轮动画测试新增前）：799 tests / 22 failures / 11 skipped；本轮动画定向 7 classes pass；`processorTest`: pass |
+| 构建 | JDK 17：`./gradlew build -x test --offline` pass；全量测试未在本轮重跑 |
+| 文档自检 | 未运行：Python 解释器不可用；详见 §6 |
 
 复核命令：
 
 ```bash
-source gradle-env.sh   # 本机提供的 Gradle/JDK 环境脚本
-LANG=C.UTF-8 LC_ALL=C.UTF-8 ./gradlew build --offline --console=plain
+# Requires JAVA_HOME to point to an installed JDK 17.
+LANG=C.UTF-8 LC_ALL=C.UTF-8 ./gradlew build -x test --offline --console=plain
 sha256sum build/libs/kinetic-3.0-dev-forge+mc1.20.1.jar
-python3 docs/tools/check_docs.py
+./gradlew test --console=plain   # full audio verification also requires KINETIC_AUDIO_FIXTURE_DIR
+python3 docs/tools/check_docs.py   # requires Python 3
 ```
 
 ## 1. 崩溃安全
@@ -110,10 +112,10 @@ find todo/gun-lod/src -name "*.java" -exec cat {} + | wc -l                     
 `ProneActionThroughputTest` 用 20 万次预热 + 100 万次计时量出单次成本：
 
 ```bash
-LANG=C.UTF-8 LC_ALL=C.UTF-8 ./gradlew test --offline --tests "*ProneActionThroughputTest"
-# 报告里的 system-out：
-# [perf] ProneAction.advance = 47.8 ns/call (1000000 calls in 47 ms)
-# [perf] ProneAction.ease    = 47.8 ns/call
+./gradlew test --offline --tests "*ProneActionThroughputTest"
+# 本轮本机 system-out：
+# [perf] ProneAction.advance = 35.8 ns/call (1000000 calls in 35 ms)
+# [perf] ProneAction.ease    = 30.8 ns/call
 ```
 
 断言上限 2000 ns/call，留了约 40 倍余量吸收 CI 抖动；目的是发现"这条每帧路径上出现分配或哈希查找"
@@ -123,6 +125,31 @@ LANG=C.UTF-8 LC_ALL=C.UTF-8 ./gradlew test --offline --tests "*ProneActionThroug
 
 - `PronePredicate.detect` 的物品分类只在 `isUsingItem()` 为真时执行；
 - `PlayerAnimatableCapability` 的皮肤变体判定已从"每帧轮询"改为"事件 + 失效集合驱动"（提交 `987d98e` 之前的工作）。
+
+### 本次 CPU 基线
+
+诊断主机为 Intel Core i5-1135G7 @ 2.40 GHz、Windows 10 x64、Temurin JDK 17.0.20.1；内嵌 Windows native DLL 报告 AVX2。以下是单次本机基线，不是跨设备性能承诺。
+
+```bash
+KINETIC_BENCH_EXTRACT=1 KINETIC_BENCH_DIAGNOSTIC=1 KINETIC_BENCH_RENDER=1 ./gradlew test --offline --tests "*NativeExtractCostBenchmarkTest*"
+KINETIC_BENCH_MOLANG=1 ./gradlew test --offline --tests "*MolangEvaluationBenchmarkTest*"
+```
+
+`NativeExtractCostBenchmarkTest` 用合成 opaque 模型；Extract 预热 5,000 次，计时 200,000 次并按 5 个 40,000-call batch 报告中位数。render 直接计时 `NativeRenderer.nRender` 的 JNI fallback `int[]` 输出，预热 500 次、5 个 2,000-draw batch，不包含 Java `VertexConsumer` 回放、Minecraft/Iris draw 或 GPU。
+
+| 模型形状 | 骨骼 / cube | scheduled vertices | Extract batch 中位数 | Native render batch 中位数 |
+| --- | ---: | ---: | ---: | ---: |
+| tiny | 1 / 1 | 12 | 437.8 ns/call | 670.3 ns/draw |
+| small | 6 / 6 | 72 | 666.9 ns/call | 783.6 ns/draw |
+| mid | 16 / 16 | 192 | 873.6 ns/call | 1,588.9 ns/draw |
+| large | 31 / 25 | 300 | 1,410.3 ns/call | 1,585.8 ns/draw |
+| player shape | 61 / 46 | 552 | 2,372.1 ns/call | 2,605.1 ns/draw |
+
+线程分配计数显示，Extract 原先每次稳定分配 `144 B`，来源是 Java pose/render-index 借用视图包装；按 native 地址与数量复用后，本轮稳定状态计量为 `0 B/call`。其中 player shape 从 144 B 降至 56 B 再到 0 B；Extract 耗时在各轮 batch 波动内，没有据此宣称帧耗时下降。`NativeModelStateIntegrationTest` 覆盖稳定地址复用、ShortBuffer cursor 重置、失败失效与 close。
+
+`MolangEvaluationBenchmarkTest` 使用一个动态 `query.life_time` 变量及固定表达式。本机单次测量为 parse `2,322 ns / 1,128 B`、evaluate `23.6 ns / 32 B`；evaluate batch 约 13~36 ns，波动较大。该样本不代表完整 controller、实际模型表达式分布或生产 GC。
+
+这些诊断不含真实模型加载、动画 controller 全链、Java 顶点提交、多实体调度、透明/PBR、多 pass、GPU 同步、MSPT 或 GC 周期；不能替代 Forge/Iris A/B 或目标设备验证。native 源码工程不在当前工作树，以上 native 数据来自预编译 DLL。
 
 ## 4. 动画
 
@@ -150,3 +177,11 @@ LANG=C.UTF-8 LC_ALL=C.UTF-8 ./gradlew test --offline --tests "*ProneActionThroug
 | 第一人称手臂 / 背景渲染 | `RenderArmEvent` 与背景层调用仍被注释；启用必须实机验证 |
 | Curios worker 路径 | 已加线程门，但 worker 上"条件为 false"的观感没有实机验证 |
 | 动画求值的事务性 | 控制器级已隔离，但被跳过的那一帧仍是"部分更新"（同帧更早的控制器写入不回滚） |
+
+## 6. 本轮执行记录（2026-11-15）
+
+- 聚焦验证通过：`NativeExtractCostBenchmarkTest`、`NativeModelStateIntegrationTest`（3 tests）、Molang benchmark/语义测试（2 tests）和 `ProneActionThroughputTest`（2 tests）。`processorTest --offline` 通过。
+- 本轮动画定向验证通过：`ProneActionTest`、`PronePoseDataTest`、`PronePredicateMappingTest`、`ProneSwingAlternationTest`、`ProneSwingHandoverTest`、`ProneWiringTest`、`SwingPredicateStopRuleTest`。
+- 本轮 JDK 17 构建 `./gradlew build -x test --offline` 通过，产物字节数和 SHA-256 见 §0；Javadoc 生成过程报告了生成源码与注释警告，但任务未失败。
+- 全量 `test` 的最近记录为动画测试增加前的 799 tests、22 failures、11 skipped，本轮未重跑全量。已知失败中，20 项音频 contract 测试因未设置 `KINETIC_AUDIO_FIXTURE_DIR` 且当前工作区找不到 `opus-under.ogg` / `vorbis-under.ogg` / `opus-input-rate.ogg` fixtures 而失败；`FinalClosureSupervisorTest.successfulGitStderrIsRetainedButExcludedFromStdoutPaths` 在 Windows 上实际得到带换行的 `guide.md\n`；`ModelExporterTest.currentContainerWrittenWithExportSuffixIsRediscoveredAsDirectArtifact` 可在隔离运行中复现，但诊断确认导出文件存在且已出现在 inventory，失败来自测试直接比较 8.3 短路径与 `toRealPath()` 长路径，属于路径规范化测试问题，不是生产发现遗漏。该测试未在本任务范围内修改。
+- `git diff --check` 通过。`docs/tools/check_docs.py` 与 `check_complexity_relationships.py` 未能运行：没有可用 Python 解释器，`python` 不存在，`python3` 的 WindowsApps 别名以错误码 9009 退出。

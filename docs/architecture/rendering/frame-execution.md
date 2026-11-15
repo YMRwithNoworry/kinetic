@@ -8,6 +8,7 @@
 |---|---|
 | `BoneAttribute` | `AnimatedGeoModel` 的实体级求值结果；Extract 期间只临时读取，通道语义见[骨骼输出](../animation/processor-and-bone-output.md) |
 | pose / normal buffer | Native `ModelState` 拥有 `BonePose` 容器；Extract 原位写入，Java 通过 `BonePoseView` 借用 |
+| Java view wrappers | `NativeModelState` 在 native address 与 element count 不变时复用 `BonePoseView` / render-index `ShortBuffer`；重用时重置 buffer cursor，地址或数量变化时重建；借用期限不变 |
 | frame state | `GeoModelState` 拥有 native `ModelState`；后者共享 `BakedModel`，并拥有 pose、可见骨骼索引、locator scratch、`RenderSchedule` 与有效标记 |
 | locator result | Native 临时暂存并复制 active locator 骨骼索引；Java 保存 locator 到骨骼索引的映射，访问时读取同一状态的借用 pose view |
 | `RenderSchedule` | 当前可见骨骼和 worker 数对应的只读计划；由 `RenderTask` 描述工作与输出范围 |
