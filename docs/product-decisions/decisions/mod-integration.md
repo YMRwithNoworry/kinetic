@@ -4,19 +4,21 @@
 - Select: TaCZ/SlashBlade/背包/Curios、Oculus/Iris 与未来桥接 API
 - Needs:
   - 界定外部玩法职责: [DD.rendering-only-replacement](visual-gameplay-boundary.md#ddrendering-only-replacement)
-  - 处理高风险侵入或例外: [DD.intrusive-change-needs-adjudication](integration-risk.md#ddintrusive-change-needs-adjudication)
-  - 可选依赖不兼容: [DD.local-failure-degradation](failure-isolation.md#ddlocal-failure-degradation)
+  - 判断高风险侵入与具体例外: [DD.intrusive-change-needs-adjudication](integration-risk.md#ddintrusive-change-needs-adjudication); [BC.intrusion-exception-is-specific](integration-risk.md#bcintrusion-exception-is-specific)
+  - 处理可选依赖不兼容: [DD.local-failure-degradation](failure-isolation.md#ddlocal-failure-degradation)
   - 外部模型附着: [DD.preserve-vanilla-attachments](attachments.md#ddpreserve-vanilla-attachments)
   - 外部动作适配: [DD.model-controller-overrides-builtins](bone-and-controller.md#ddmodel-controller-overrides-builtins)
   - 状态读取与输入: [DD.client-evaluates-visible-state](animation-sampling.md#ddclient-evaluates-visible-state)
 - Landing:
   - [future](../../future/mod-animation-integration.md)
+  - [architecture](../../architecture/integration/tacz-hit-detection.md)
+  - [status](../../status/known-issues/animation.md#tacz-player-projectile-hit-detection)
   - [status](../../status/known-issues/animation.md#联动与验证)
 
 ### BC.integration-does-not-redefine-gameplay
 
 - Decision: [DD.rendering-only-replacement](visual-gameplay-boundary.md#ddrendering-only-replacement)
-- Claim: 持枪、开枪、匍匐、连招及装备展示等联动表现不自行改变武器伤害、攻击判定、装备能力或其他模组的玩法状态。
+- Claim: 持枪、开枪、匍匐、连招及装备展示等联动表现不自行改变武器伤害、攻击判定、装备能力或其他模组的玩法状态；本包明确记录的玩法边界例外是 [BC.tacz-player-bullet-model-hitbox](visual-gameplay-boundary.md#bctacz-player-bullet-model-hitbox)，仅适用于 TaCZ 子弹对玩家的服务端验证模型 OBB 窄相，并在姿态或数据不可用时回退至 TaCZ 原 AABB。
 
 ## DD.compose-external-models-and-animation
 
@@ -29,7 +31,7 @@
 
 | 联动内容 | 外部内容职责 | KINETIC 职责 |
 |---|---|---|
-| TaCZ | 枪械模型、特效及枪械玩法 | 接入枪械渲染，提供持枪、开枪、匍匐等角色动画 |
+| TaCZ | 枪械模型、特效及枪械玩法 | 接入枪械渲染，提供持枪、开枪、匍匐等角色动画；玩家弹道命中例外仅按 [专项目标与降级边界](visual-gameplay-boundary.md#bctacz-player-bullet-model-hitbox) 执行 |
 | SlashBlade | 太刀模型、攻击特效及武器玩法 | 提供连招动画 |
 | Sophisticated Backpacks | 背包模型及背包玩法 | 接入背包渲染 |
 

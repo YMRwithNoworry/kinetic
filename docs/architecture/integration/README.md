@@ -13,6 +13,7 @@
 | 登录与退出 | `ClientLoggedEvent`、`ServerStartingEvent` | 将 exact connection 或 server lifecycle 交给对应 session/service owner |
 | 客户端输入与命令 | `client.input`、`client.command`、`command` | 产生选择、动画或管理意图，继续经过所属领域入口 |
 | Entity 替换绘制 | `GeoReplacedEntityRenderer`、`client.renderer` | 消费已准备的 `GeoRenderData`，选择 render state 并交给 renderer |
+| TaCZ 玩家弹道命中链 | [TaCZ 命中架构](tacz-hit-detection.md) | 当前仍是 TaCZ AABB 路径；KINETIC 尚无服务端 OBB 姿态 owner |
 | 可选模组适配 | `client.compat` 与 controller collection | 把外部动作、装备、视角和材质条件投影为当前输入或绘制行为 |
 
 模型替换的业务范围与可选联动降级由[联动决策](../../product-decisions/decisions/mod-integration.md)和[联动风险](../../product-decisions/decisions/integration-risk.md)定义；玩家死亡布娃娃的可见身体接管见[布娃娃身体接管](ragdoll.md)，真实相机的相机绑定解算见[真实相机绑定](camera-binding.md)，枪械几何按距离降级的 LOD 引擎已移出模组（源码暂存于仓库根的 `todo/gun-lod/`，不参与构建），当前入口见[枪械 LOD（已移出）](gun-lod.md)，恢复与否所需的实测数据见[枪械 LOD 裁决材料](../../future/gun-lod-decision.md)。现有兼容分支不是统一输入层；其未收敛的部分见[动画问题](../../status/known-issues/animation.md)。

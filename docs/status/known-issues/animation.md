@@ -2,6 +2,12 @@
 
 本页只记录当前实现可证实的动画缺口。正常职责和数据流见[动画架构](../../architecture/animation/README.md)。
 
+## TaCZ player projectile hit detection
+
+- 当前构建固定依赖 Modrinth 官方 `maven.modrinth:timeless-and-classics-zero:1.2.0-hotfix`（版本 ID `4yAbMXbz`，Minecraft 1.20.1 Forge，2026-11-15 发布；截至 2026-11-18 为该组合最新发行，对应 CurseForge 文件 `9623132`）。此发行的玩家弹道命中仍由 TaCZ `EntityUtil` / `HitboxHelper` 处理；候选实体、线段命中、历史 AABB 与 headshot 均保留 TaCZ 行为，KINETIC 尚无针对该调用链的运行时代码。
+- 服务端持有经其裁决的模型选择和 model data 来源，但不求值 KINETIC 的 animation、controller 或 bones；当前同步也不包含可被服务端信任的逐骨骼姿态。因而目前没有可证明完整的服务端 OBB 姿态支持集。客户端渲染矩阵、partial-tick 骨骼状态或客户端提交的 hitbox 不能代替服务端事实。**当前所有姿态都沿用 TaCZ 原 AABB**，并未改写 Minecraft 玩家物理 AABB。
+- 在服务端姿态 owner 和可验证形状建立以前，不接入 TaCZ Mixin，也不生成不完整 OBB。产品授权的精确例外、范围和失败边界见[决策](../../product-decisions/decisions/visual-gameplay-boundary.md#bctacz-player-bullet-model-hitbox)；当前调用链见[架构说明](../../architecture/integration/tacz-hit-detection.md)。缺少 TaCZ 的服务端/双客户端运行验证；当前未声称 OBB 命中可用。
+
 ## 求值与语义
 
 - `isMoving` 当前有逻辑错误，会影响依赖该字段的 `CodedAnimationController`。

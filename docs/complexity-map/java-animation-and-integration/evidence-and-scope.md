@@ -15,6 +15,8 @@
 
 **真实相机绑定（`CameraBindGeometry` / `CameraBindSolver` / `RealCameraBindSource` / `RealCameraBindingInner`）本次不分配独立机制节点，且属于净归约。** 它删除的是一条既有协调机制：过去绑定正确性依赖"KINETIC 这一帧一定被画过"，于是对方要在每帧、在关卡渲染之外把模型重画 4~8 遍并捕获顶点，这条路径同时引入了额外绘制、与正常帧不一致的渲染上下文，以及"没画出来就判失败"的恢复分支。改后它只消费已建图产物：原生烘焙几何（NR-04/05）、逐骨骼姿态视图（NR-08/09）、`GeoReplacedEntityRenderer#applyModelPose` 的姿态应用与 `GeoRenderData`（AN-11/12 的宿主输出路径）。没有新的 owner、生命周期交错、跨子系统边或恢复分支——失败一律让位给对方自己的路径，不新增状态机。因此本页只登记归约事实，不分配 AN 节点、不写因果边、不计入机制数。产品义务已在[产品决策](../../product-decisions/decisions/camera-binding.md)中裁决，机制说明见[真实相机绑定](../../architecture/integration/camera-binding.md)，当前缺口见[渲染已知问题](../../status/known-issues/rendering.md#相机绑定)。若后续评审认为"与外部相机模组共享同一帧的最终位姿"构成独立的接入义务，应为其分配 AN 节点并登记与 AN-11/AN-12 的关系。
 
+**TaCZ 玩家弹道 OBB 目前不是生产机制。** 产品边界已在 [DD.rendering-only-replacement](../../product-decisions/decisions/visual-gameplay-boundary.md#ddrendering-only-replacement) 下记录为 TaCZ 专项契约，但服务端仍不求值 KINETIC 骨骼姿态，实际行为继续使用 TaCZ AABB。当前没有可分配的 AN 节点或跨子系统因果边；只有出现真实服务端形状 owner 与 TaCZ 命中接入机制后，才按其实际协调关系更新机制图。现状见[TaCZ 命中架构](../../architecture/integration/tacz-hit-detection.md)与[支持缺口](../../status/known-issues/animation.md#tacz-player-projectile-hit-detection)。
+
 本主题记录 14 个生产机制。声音 handoff 双序已有局部自动化；Forge once-only、真实 host adoption/容量、第三方 consumer、真实多 pass 画面和跨线程可见性仍需运行验证。上面第二行的缺口不计入本主题机制数——它列的是"待建图范围"，不是已建图节点。
 
 ## 证据入口

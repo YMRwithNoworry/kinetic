@@ -281,7 +281,7 @@ dependencies {
     collabImplementation "curse.maven:cosmetic-armor-reworked-237307:${cosmetic_armor_id}"
     collabImplementation "curse.maven:elytra-slot-317716:${elytra_slot_id}"
     collabImplementation "maven.modrinth:parcool:1.20.1-3.4.1.2-forge"
-    collabImplementation 'curse.maven:timeless-and-classics-zero-1028108:6654541-sources-6654543'
+    collabImplementation "maven.modrinth:timeless-and-classics-zero:1.2.0-hotfix"
 
     // swem 需要
     collabImplementation "curse.maven:playeranimator-658587:4587214"
