@@ -15,6 +15,7 @@ import com.kinetic.geckolib3.model.AnimatedGeoModel;
 import com.kinetic.natives.render.NativeRenderer;
 import com.kinetic.natives.render.RenderContextType;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.raiiiden.ragdollified.RagdollTransform;
 import com.raiiiden.ragdollified.client.ClientRagdoll;
 import com.raiiiden.ragdollified.client.ClientRagdollCamera;
 import com.raiiiden.ragdollified.client.ClientRagdollManager;
@@ -235,7 +236,7 @@ public final class KineticRagdollRenderer {
                     continue;
                 }
                 try {
-                    render(ragdoll, poseStack, buffers, camera, deltaSeconds);
+                    render(ragdoll, torso, poseStack, buffers, camera, deltaSeconds);
                 } catch (RuntimeException failure) {
                     // 单个布娃娃绘制失败不能影响整帧：丢弃状态并让 Ragdollified 恢复原版人形。
                     dropState(ragdoll.getId());
@@ -250,7 +251,8 @@ public final class KineticRagdollRenderer {
         }
     }
 
-    private static void render(ClientRagdoll ragdoll, PoseStack poseStack, MultiBufferSource buffers,
+    private static void render(ClientRagdoll ragdoll, RagdollTransform torso,
+                               PoseStack poseStack, MultiBufferSource buffers,
                                net.minecraft.world.phys.Vec3 camera, float deltaSeconds) {
         int ragdollId = ragdoll.getId();
         if (!mixinObserved) {
@@ -357,7 +359,7 @@ public final class KineticRagdollRenderer {
             dropState(ragdollId);
             return;
         }
-        draw(state, ragdollId, texture, poseStack, buffers, camera);
+        draw(state, ragdollId, texture, poseStack, buffers, camera, torso);
     }
 
     /**
@@ -500,7 +502,8 @@ public final class KineticRagdollRenderer {
 
     private static void draw(KineticRagdollState state, int ragdollId, ResourceLocation texture,
                              PoseStack poseStack, MultiBufferSource buffers,
-                             net.minecraft.world.phys.Vec3 camera) {
+                             net.minecraft.world.phys.Vec3 camera,
+                             RagdollTransform torso) {
         var rotation = state.partRotations()[com.raiiiden.ragdollified.RagdollPart.TORSO.index];
 
         poseStack.pushPose();
@@ -521,7 +524,7 @@ public final class KineticRagdollRenderer {
             // 丢掉头部（{@code ClientRagdollCamera#isHeadHidden}）；KINETIC 整具尸体只有一次原生提交，
             // 分不出「只画身体」，但强制裁剪后头骨内壁是背面、直接被剔掉，效果与丢掉头部一致：
             // 看得见肢体，看不见自己的颅内。
-            boolean insideHead = ClientRagdollCamera.isHeadHidden(ragdollId);
+            boolean insideHead = ClientRagdollCamera.isHeadHidden(ragdollId, torso);
             var renderType = IGeoRenderer.entityRenderType(texture,
                     renderState.hasTranslucentVertices(),
                     insideHead || ClientConfig.CULL_BACK_FACES.get());

@@ -11,7 +11,6 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.fml.loading.LoadingModList;
 import org.jetbrains.annotations.Nullable;
 
@@ -26,16 +25,15 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Ragdollified 兼容层：玩家死亡时改用布娃娃，并把「死亡瞬间的关节姿态」交给它。
  *
- * <p><b>为什么用反射</b>：Ragdollified 是可选依赖。走反射可以做到零编译期依赖、不把它加进构建，
- * 也不会因为它换版本而在类加载阶段崩溃（方法缺失时安全降级为「保持 KINETIC 原有行为」）。
+ * <p><b>可选依赖边界</b>：构建以受支持的 Ragdollified API 编译，但仅作 compile-only，不会打包提供方。
+ * 运行时先检查模组是否安装；与版本相关的入口通过反射解析，失败时保留 KINETIC 自身的死亡动画。
  *
  * <p><b>用到的 API（均已对着发布版 JAR 用 javap 核实，非猜测）</b>：
  * <ul>
- *   <li>{@code RagdollifiedApi#spawn(LivingEntity)} —— 触发入口，源码注释明确说明它
- *       「ignoring the automatic-death enable list」；</li>
+ *   <li>{@code RagdollifiedApi#spawn(LivingEntity)} —— 当带来源入口不可用时的无来源兼容回退，
+ *       源码注释明确说明它「ignoring the automatic-death enable list」；</li>
  *   <li>{@code RagdollifiedConfig#isRagdollEnabledFor(String, boolean)} —— 玩家布娃娃是否被配置启用；</li>
- *   <li>{@code RagdollifiedConfig.RAGDOLL_LIFETIME} —— 清除时间（ticks），仅用于日志：实际生效由
- *       Ragdollified 自己读取，{@code SpawnOptions} 里并没有生命周期参数；</li>
+ *   <li>{@code RagdollifiedConfig.RAGDOLL_LIFETIME} —— 清除时间（ticks），用于死亡姿态快照的保留时长；</li>
  *   <li>{@code MobPoseCapture#storePose(int, MobPose)} —— <b>姿态注入入口</b>；</li>
  *   <li>{@code RagdollifiedApi#hasRagdoll(Entity)} —— 判断姿态是否已被消费。</li>
  * </ul>
@@ -78,8 +76,8 @@ public final class RagdollifiedCompat {
     private static final Map<Integer, Long> PENDING_VERIFY = new ConcurrentHashMap<>();
     /** 布娃娃最终没出现的实体；它们的死亡动画不再让出。 */
     private static final Map<Integer, Long> FALLBACK_DEATHS = new ConcurrentHashMap<>();
-    /** 等服务端布娃娃的实体（entityId → 补 spawn 的 tick）。 */
-    private static final Map<Integer, Long> DEFERRED_SPAWN = new ConcurrentHashMap<>();
+    /** 客户端兜底生成请求（entityId → 截止 tick 与死亡伤害来源）。 */
+    private static final Map<Integer, DeferredSpawn> DEFERRED_SPAWN = new ConcurrentHashMap<>();
     private static boolean poseResolved;
 
     @Nullable private static Method spawnMethod;
@@ -125,6 +123,9 @@ public final class RagdollifiedCompat {
     private static final Map<Integer, PendingPose> PENDING_POSES = new ConcurrentHashMap<>();
 
     private record PendingPose(Object pose, long storedAtMs) {
+    }
+
+    private record DeferredSpawn(long dueTick, @Nullable DamageSource damageSource) {
     }
 
     private RagdollifiedCompat() {
@@ -283,16 +284,10 @@ public final class RagdollifiedCompat {
         }
     }
 
-    /** 布娃娃清除时间（ticks），来自 Ragdollified 的配置；仅用于日志与诊断。 */
+    /** 布娃娃清除时间（ticks），来自 Ragdollified 配置，用于快照保留时长与诊断。 */
     public static int getRagdollLifetimeTicks() {
-        if (ragdollLifetimeValue instanceof ForgeConfigSpec.IntValue value) {
-            try {
-                return value.get();
-            } catch (RuntimeException ignored) {
-                // 配置尚未加载
-            }
-        }
-        return -1;
+        Number value = RagdollTuning.readConfigNumber(ragdollLifetimeValue);
+        return value == null ? -1 : value.intValue();
     }
 
     /**
@@ -301,14 +296,8 @@ public final class RagdollifiedCompat {
      * <p>返回负数表示拿不到（老版本没有这个字段，或配置尚未加载），调用方应退回提供方文档里的默认值。
      */
     public static double getRagdollRenderDistance() {
-        if (ragdollRenderDistanceValue instanceof ForgeConfigSpec.DoubleValue value) {
-            try {
-                return value.get();
-            } catch (RuntimeException ignored) {
-                // 配置尚未加载
-            }
-        }
-        return -1.0;
+        Number value = RagdollTuning.readConfigNumber(ragdollRenderDistanceValue);
+        return value == null ? -1.0 : value.doubleValue();
     }
 
     /**
@@ -366,13 +355,13 @@ public final class RagdollifiedCompat {
     }
 
     /**
-     * 客户端玩家死亡入口：捕获死亡姿态、注入提供方的初始姿态，并立刻排队布娃娃。
+     * 客户端玩家死亡入口：注入死亡姿态，并延后安排客户端兜底，优先等待服务端权威布娃娃。
      *
      * <p><b>为什么不能只靠 {@code LivingDeathEvent}</b>：Forge 只在 {@code LivingEntity#die} 里发出该事件，
      * 而客户端的 {@code LivingEntity#hurt} 在 {@code level().isClientSide} 时直接返回，
      * {@code handleEntityEvent(3)} 又显式跳过玩家，因此玩家死亡时客户端根本不会收到这个事件。
-     * 只挂在它上面的结果是：姿态从未被捕获、布娃娃只能等服务器包（约一秒后才出现）、
-     * 致死一击的方向与冲量也从未被交给提供方。
+     * 只挂在它上面的结果是：客户端通常捕获不到死亡姿态，无法及时续上姿态快照，也无法在服务端布娃娃未同步时
+     * 安排带致死伤害来源的客户端兜底。
      *
      * @return 是否已请求生成布娃娃
      */
@@ -383,7 +372,7 @@ public final class RagdollifiedCompat {
     /**
      * 同上，但由调用方给出致死一击的伤害来源（{@code LivingDeathEvent#getSource()}）。
      *
-     * @return 是否已请求生成布娃娃
+     * @return 是否已捕获姿态并排入延后兜底队列
      */
     public static boolean handleClientDeath(AbstractClientPlayer player, @Nullable DamageSource source) {
         if (!isAvailable() || !isPlayerRagdollEnabled()) {
@@ -391,25 +380,14 @@ public final class RagdollifiedCompat {
         }
         // 顺序不能反：提供方只在姿态年龄 ≤50ms 时采用注入的姿态，否则会退回它自己捕获的预设姿态。
         boolean posed = storeDeathPose(player);
-        boolean queued = spawnRagdoll(player, source);
-        // 1.2.2 起布娃娃是**服务端权威**的：服务端在 death 时生成、把 spawn 包同步给客户端，
-        // 客户端只负责渲染（PhysicsHooks.spawnRagdoll 里写死 isPlayer → HUMANOID_STANDARD，
-        // 不看客户端渲染器）。所以客户端这次 spawn 只是**兜底**，正常情况下服务端那份很快就到；
-        // 我们先排队验证，确认没有服务端那份时再由这里补上。
-        DEFERRED_SPAWN.put(player.getId(), currentTick() + DEFERRED_SPAWN_TICKS);
-        if (queued) {
-            PENDING_VERIFY.put(player.getId(), currentTick() + RAGDOLL_VERIFY_TICKS);
-            Kinetic.LOGGER.debug("Queued a Ragdollified ragdoll for {} "
-                            + "(death pose captured: {}, damage source: {}, lifetime {} ticks)",
-                    player.getName().getString(), posed,
-                    source == null ? "none" : source.getMsgId(), getRagdollLifetimeTicks());
-        } else {
-            Kinetic.LOGGER.info("[Ragdollified] could not queue a ragdoll for {} "
-                            + "(death pose captured: {}); the corpse will fall back to the "
-                            + "provider's own spawn path",
-                    player.getName().getString(), posed);
-        }
-        return queued;
+        // 1.2.2 起服务器是玩家布娃娃的权威生成方。此处绝不能立刻在客户端重复 spawn：
+        // 先让服务端的死亡处理和 spawn 包有机会抵达，六 tick 后仍没有时再走客户端兜底。
+        DEFERRED_SPAWN.put(player.getId(),
+                new DeferredSpawn(currentTick() + DEFERRED_SPAWN_TICKS, source));
+        Kinetic.LOGGER.debug("Captured Ragdollified death pose for {}; waiting {} ticks for the server ragdoll "
+                        + "before client fallback (pose captured: {})",
+                player.getName().getString(), DEFERRED_SPAWN_TICKS, posed);
+        return true;
     }
 
     /**
@@ -617,7 +595,7 @@ public final class RagdollifiedCompat {
             return;
         }
         long now = currentTick();
-        Iterator<Map.Entry<Integer, Long>> it = DEFERRED_SPAWN.entrySet().iterator();
+        Iterator<Map.Entry<Integer, DeferredSpawn>> it = DEFERRED_SPAWN.entrySet().iterator();
         while (it.hasNext()) {
             var entry = it.next();
             int entityId = entry.getKey();
@@ -625,7 +603,8 @@ public final class RagdollifiedCompat {
                 it.remove();
                 continue;
             }
-            if (now < entry.getValue()) {
+            DeferredSpawn deferred = entry.getValue();
+            if (now < deferred.dueTick()) {
                 continue;
             }
             it.remove();
@@ -637,7 +616,9 @@ public final class RagdollifiedCompat {
             if (!(entity instanceof LivingEntity living)) {
                 continue;
             }
-            if (spawnRagdoll(living, living.getLastDamageSource())) {
+            DamageSource damageSource = deferred.damageSource() != null
+                    ? deferred.damageSource() : living.getLastDamageSource();
+            if (spawnRagdoll(living, damageSource)) {
                 PENDING_VERIFY.put(entityId, now + RAGDOLL_VERIFY_TICKS);
                 Kinetic.LOGGER.info("[Ragdollified] server did not provide a ragdoll for {} within {} ticks; "
                         + "queued a client-side one", entityId, DEFERRED_SPAWN_TICKS);
@@ -687,21 +668,23 @@ public final class RagdollifiedCompat {
         if (!isAvailable()) {
             return false;
         }
-        try {
-            if (hasRagdollByIdMethod != null) {
+        if (hasRagdollByIdMethod != null) {
+            try {
                 Object result = hasRagdollByIdMethod.invoke(null, entityId);
-                if (result instanceof Boolean present) {
-                    return present;
+                if (Boolean.TRUE.equals(result)) {
+                    return true;
                 }
+            } catch (ReflectiveOperationException | RuntimeException ignored) {
+                // 接着检查本地队列；两个探测入口相互独立。
             }
-            if (hasPendingOrActiveMethod != null) {
+        }
+        if (hasPendingOrActiveMethod != null) {
+            try {
                 Object result = hasPendingOrActiveMethod.invoke(null, entityId);
-                if (result instanceof Boolean present) {
-                    return present;
-                }
+                return Boolean.TRUE.equals(result);
+            } catch (ReflectiveOperationException | RuntimeException ignored) {
+                // 查不到就当没有：宁可回退画死亡姿势，也不要让尸体消失。
             }
-        } catch (ReflectiveOperationException | RuntimeException ignored) {
-            // 查不到就当没有：宁可回退画死亡姿势，也不要让尸体消失
         }
         return false;
     }

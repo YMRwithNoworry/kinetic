@@ -7,7 +7,7 @@ import net.minecraft.client.player.AbstractClientPlayer;
 
 /**
  * 客户端玩家死亡探测：每 tick 观察客户端玩家是否进入「死亡」状态，并在第一次观察到时触发 KINETIC 的
- * 布娃娃联动（捕获死亡姿态 + 立刻排队布娃娃）。
+ * 布娃娃联动（捕获死亡姿态 + 等待服务端生成，超时后客户端兜底）。
  *
  * <p><b>为什么不监听 {@code LivingDeathEvent}</b>：该事件只在 {@code LivingEntity#die} 里发出，而客户端
  * 的 {@code LivingEntity#hurt} 在 {@code level().isClientSide} 时立即返回，{@code handleEntityEvent(3)}
@@ -44,7 +44,7 @@ public final class RagdollifiedDeathWatcher {
             if (!markIfNewDeath(entityId, player.isDeadOrDying(), HANDLED)) {
                 continue;
             }
-            // 死亡当刻：先捕获姿态再排队，两者都必须在客户端玩家实体被移除（死亡 20 tick 后）之前完成。
+            // 死亡当刻先注入姿态并安排服务端等待；客户端兜底在 6 tick 后触发，早于玩家实体被移除。
             RagdollifiedCompat.handleClientDeath(player);
         }
         // 实体离开客户端世界（重生、换维度、断线）后不留陈旧条目，避免 id 复用时漏掉下一次死亡。

@@ -19,7 +19,7 @@
 
 玩家在客户端**收不到** `LivingDeathEvent`：该事件只在 `LivingEntity#die` 中发出，而客户端的 `LivingEntity#hurt` 在 `level().isClientSide` 时立即返回，`handleEntityEvent(3)` 又显式跳过玩家。因此死亡入口观察**客户端玩家的死亡状态**（每 tick 检查 `isDeadOrDying`），而不是监听事件；同一个实体在一次死亡中只处理一次，复活或离开世界后清除记录。
 
-死亡当刻必须按顺序完成三件事，且都要在客户端移除该玩家实体（死亡 20 tick 后）之前完成：捕获 KINETIC 当前骨骼姿态 → 把该姿态注入提供方 → 带 `DamageSource` 排队布娃娃。冲量只在提供方的 `createFromEntity(entity, damageSource)` 路径里产生，走无伤害来源的排队入口会得到零冲量；排队后提供方自身的死亡处理会因去重而跳过，所以这一步必须由 KINETIC 完成。
+死亡当刻先捕获 KINETIC 当前骨骼姿态并注入提供方；随后客户端优先等待服务端权威布娃娃及其同步。等待 6 tick 仍未见布娃娃时，KINETIC 才用保留的致死 `DamageSource` 走 `createFromEntity(entity, damageSource)` 兜底生成。姿态注入与客户端兜底都发生在客户端玩家实体移除（死亡 20 tick 后）之前；带来源的兜底入口同时保留致死一击方向与冲量。
 
 实体被移除后，接管状态改为依赖死亡瞬间的快照（模型来源、宽高缩放、贴图），不再依赖仍然存活的 capability；模型资源被回收导致原生提取失败时，捕获异常并降级回提供方的原版人形，而不是每帧重试。
 
@@ -92,7 +92,8 @@ KINETIC 在这里补的是另外两种情形：
 每帧每具布娃娃的成本被限制为：一次骨骼属性数组拷贝、六次四元数反解、至多三个固定子步的阻尼积分、若干次防穿透检测与一次原生 extract，随后复用与普通玩家渲染相同的原生绘制路径。刚体与姿态都静止时跳过积分、姿态重建与 extract，直接复用上一次的模型状态；超出提供方绘制距离的布娃娃不参与绘制。受伤外观是这条路径上的第二遍绘制，同样受该距离约束。
 
 ## Ragdollified 1.2.2 的接口核实与让出规则
-可选依赖，全部走反射（零编译期依赖）。本文记录**对着 1.2.2 的 jar 逐项核实过**的接口面，
+Ragdollified 是可选运行时依赖：构建以 1.2.2 API 编译，但不打包提供方；运行时先检查模组是否安装，
+兼容入口再反射解析可选 API，渲染层只在提供方可用时注册。本文记录**对着 1.2.2 的 jar 逐项核实过**的接口面，
 以及"什么时候让出死亡动画"这条容易出事的规则。
 
 ### 用到的接口（对着 1.2.2 的 jar 逐项核实）
@@ -103,24 +104,26 @@ KINETIC 在这里补的是另外两种情形：
 | `api.RagdollifiedApi` | `hasRagdoll(Entity)` / `hasRagdoll(int)` | 判断布娃娃是否真的存在 |
 | `api.RagdollifiedApi` | `setEntityHidden(int, boolean)` / `isEntityHidden(int)` | **1.2.2 新增**：隐藏/恢复尸体 |
 | `config.RagdollifiedConfig` | `isRagdollEnabledFor(String, boolean)` | 玩家布娃娃是否被配置启用 |
-| `config.RagdollifiedConfig` | `RAGDOLL_LIFETIME` | 清除时间（仅日志） |
+| `config.RagdollifiedConfig` | `RAGDOLL_LIFETIME` | 清除时间；驱动死亡姿态快照保留时长 |
+| `config.RagdollifiedConfig` | `RENDER_DISTANCE` | 提供方布娃娃绘制距离 |
 | `MobPoseCapture` | `storePose(int, MobPose)` | 注入死亡瞬间姿态 |
 | `client.ClientRagdollManager` | `createFromEntity(LivingEntity, DamageSource)` | 带致死一击的生成 |
 | `client.ClientRagdollManager` | `hasPendingOrActiveRagdoll(int)` | 判断是否已排队 |
+| `client.ClientRagdollCamera` | `isHeadHidden(int, RagdollTransform)` | 依据布娃娃躯干变换判断相机是否在头部内 |
 
-> 1.2.2 的 `RAGDOLL_LIFETIME` 是它自己的 `ConfigSpec$IntValue`，不是 Forge 的
-> `ForgeConfigSpec.IntValue`，所以"读取生命周期只用于日志"那段在 1.2.2 上拿不到值——
-> 不影响功能。
+> 1.2.2 的 `RAGDOLL_LIFETIME` 与 `RENDER_DISTANCE` 使用自带 `ConfigSpec`，而不是 Forge 的
+> `ForgeConfigSpec`。KINETIC 通过共同的 `Supplier#get()` 读取两者，因此快照 TTL 和绘制距离
+> 跟随用户在 Ragdollified 中的实际配置。
 
 ## 2. 为什么"死了直接消失"（1.2.2 的行为变化）
 
-1.2.2 的 `ClientDeathHandler.onLivingDeath` 会先用
-`ClientMobModelHelper.getActualModelType(entity)` + `MobModelHelper.isSupportedModelType(...)`
-判定这个实体能不能生成布娃娃；KINETIC 换过渲染器/模型，判定落到 `UNSUPPORTED`，
-于是**提供方根本不生成**。
+1.2.2 的客户端 `ClientDeathHandler.onLivingDeath` 会按客户端模型类型过滤本地生成；KINETIC 换过渲染器时，
+该路径可能判为 `UNSUPPORTED`。但这不等于服务端不生成：服务端玩家路径将模型类型设为
+`HUMANOID_STANDARD`，并通过 spawn 包同步布娃娃。客户端玩家通常收不到 `LivingDeathEvent`，
+所以 KINETIC 必须观察死亡状态、提前注入姿态，并等实际布娃娃同步到来。
 
-而 KINETIC 这边原本只看"配置启用了玩家布娃娃"就让出死亡动画 → 尸体既没有布娃娃、
-也没有死亡姿势 → 玩家看到的就是凭空消失。
+若仅按配置立即让出动画，会在服务端 spawn 包到达前丢失尸体表现；若立即在客户端重复 spawn，
+又会与服务端实体重复。
 
 **修正后的规则**：
 
@@ -134,18 +137,17 @@ shouldYieldDeathAnimation(entity)
 
 ## 3. 回退链
 
-1. 死亡当刻：`handleClientDeath` → 注入姿态 → `spawn`；
-2. `spawn` 返回成功 → 登记 `PENDING_VERIFY`（20 tick 内验证）；
-3. 20 tick 内 `hasRagdoll`/`hasPendingOrActiveRagdoll` 仍为假 → 登记 `FALLBACK_DEATHS`
-   + 调 `setEntityHidden(id, false)` 把可能被隐藏的尸体放出来；
-4. 该实体的死亡动画恢复播放（`AnimationRegister` 按实体询问让出规则）。
+1. 死亡当刻：`handleClientDeath` 只注入姿态，并登记 6 tick 后的客户端兜底；此时不在客户端立即 `spawn`；
+2. 等待期间每 tick 先查询服务端同步来的 `hasRagdoll` / `hasPendingOrActiveRagdoll`；若已存在就取消兜底；
+3. 6 tick 后仍无服务端布娃娃，才由客户端调用带致死来源的生成入口；成功后登记 `PENDING_VERIFY`，再验证 20 tick；
+4. 验证超时仍不存在 → 登记 `FALLBACK_DEATHS` 并调用 `setEntityHidden(id, false)`；随后恢复 KINETIC 死亡动画。
 
 最坏情况因此从"玩家凭空消失"变成"播正常死亡动画"。
 
 ## 4. 测试
 
-- `RagdollDeathYieldTest`：排队后要验证、验证失败要登记回退、让出判定要按实体问且**要求真的存在**、
-  回退路径要能恢复可见性。
+- `RagdollDeathYieldTest`：客户端死亡入口不得立即 spawn，必须先等服务端；超时兜底需先查存在性；成功排队后要验证、失败要登记回退、让出判定要求真实存在，回退路径恢复可见性。
+- `RagdollTuningTest`：验证 `Supplier#get()` 数值读取兼容 Forge 与 Ragdollified 1.2.2 的配置对象，并覆盖缺失、非数值和异常值。
 
 ### 1.2.2 反编译结论：布娃娃是服务端权威的
 

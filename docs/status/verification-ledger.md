@@ -164,7 +164,7 @@ KINETIC_BENCH_MOLANG=1 ./gradlew test --offline --tests "*MolangEvaluationBenchm
 | 站起 / 死亡时的收尾 | 不再趴着时走 **SNAP 0.08s** 而不是 EXIT 0.24s；`armedCatchUp` 留住"动作是站着开始的"，再趴下当帧到位 | — | `ProneActionTest#standingUpSnapsTheRollBackWithinTheSnapWindow`、`#standingUpKeepsTheActionKindSoLyingDownAgainIsImmediate` |
 | 换弹 / 掐雷 | 支撑侧（左）手臂改为平贴体前并参与贴地补偿；原"手肘撑地"姿态只算进补偿会把躯干顶到 2.29，更像悬浮 | `30e4950` | `PronePoseDataTest` |
 | 趴下动作识别 | 打药/扔雷原先只靠联动模组接口与分类表，没进表的消耗品会被判成"没有动作"而退回通用姿势（手臂继续播站姿动画）。加了一层**物品注册名关键词**兜底（grenade/frag/medkit/syringe/inject…），投掷也按手里的东西判断 | — | `PronePredicate` 源码护栏 + `ProneSwingAlternationTest` |
-| 布娃娃没生成 | 提供方换版本后接口调不通、布娃娃没生成，而 KINETIC 照样让出死亡动画 → 尸体凭空消失。排队后每 tick 验证，20 tick 内没出现就登记回退、死亡动画继续画 | — | `RagdollDeathYieldTest` |
+| 布娃娃没生成 | Ragdollified 1.2.2 由服务端权威生成；客户端死亡入口仅注入姿态并等待 6 tick，未收到服务端布娃娃才兜底 spawn。排队后验证 20 tick，仍不存在就登记回退、恢复死亡动画和尸体可见性 | — | `RagdollDeathYieldTest`、`RagdollTuningTest` 定向测试通过（禁止立即客户端 spawn、独立探测待处理状态） |
 | 跨姿态接力 | 趴着挥到一半站起来（或反向）时，新动画从**同一进度**继续（`seekTo` + `playAnimationSeeked`），不再回到第 0 帧 | — | `AnimationSeekTest`、`ProneSwingHandoverTest` |
 | 侧躺时头的侧倾 | `Head` 的 Y（绕身体长轴）从默认 +20（实测侧倾 **84°**，像整个头侧躺在耳朵上）收到目标 **45°**；X/Z 由 `prone_head_tilt.py` 联立反解，视线俯仰与横偏都不变 | — | `PronePoseDataTest`（只钉通道存在）；数值见 `prone-actions.md` §2.1 |
 | 支撑侧手臂入地 | 贴地补偿原先排除全部四条手臂，六个动作左臂入地 1.09~2.17；改为只排除右臂与头，躯干压在支撑臂上 | `30e4950` | 同上 |

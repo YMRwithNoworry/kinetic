@@ -1,5 +1,7 @@
 package com.kinetic.client.compat.ragdollified;
 
+import java.util.function.Supplier;
+
 /**
  * 布娃娃的绘制距离与快照保留时长：两者都由 Ragdollified 的配置决定，这里只做兜底换算。
  *
@@ -24,6 +26,19 @@ public final class RagdollTuning {
     public static final long CAPTURE_TTL_MARGIN_MS = 5_000L;
 
     private RagdollTuning() {
+    }
+
+    /** Reads numeric values exposed either by ForgeConfigSpec or Ragdollified 1.2.2 ConfigSpec. */
+    static Number readConfigNumber(Object configValue) {
+        if (!(configValue instanceof Supplier<?> supplier)) {
+            return null;
+        }
+        try {
+            Object value = supplier.get();
+            return value instanceof Number number ? number : null;
+        } catch (RuntimeException ignored) {
+            return null;
+        }
     }
 
     /**
